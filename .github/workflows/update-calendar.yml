@@ -25,40 +25,59 @@ jobs:
           import os
           import re
           from pathlib import Path
+          from datetime import datetime, timezone
 
           body = os.environ.get("ISSUE_BODY", "")
+          path = Path("roster.ics")
 
-          events = []
           pattern = re.compile(
               r'(\d{4}-\d{2}-\d{2})\s*\|\s*(\d{2}:\d{2})\s*\|\s*(\d{2}:\d{2})\s*\|\s*(.+)'
           )
 
+          new_events = {}
+
           for line in body.splitlines():
               match = pattern.fullmatch(line.strip())
-              if match:
-                  date, start, end, summary = match.groups()
-                  uid = f"{date}-{start.replace(':','')}-{end.replace(':','')}@jesse232010.github.io"
+              if not match:
+                  continue
 
-                  events.append(
-                      "BEGIN:VEVENT\n"
-                      f"UID:{uid}\n"
-                      "DTSTAMP:20261001T000000Z\n"
-                      f"DTSTART;TZID=Pacific/Auckland:{date.replace('-','')}T{start.replace(':','')}00\n"
-                      f"DTEND;TZID=Pacific/Auckland:{date.replace('-','')}T{end.replace(':','')}00\n"
-                      f"SUMMARY:{summary}\n"
-                      "END:VEVENT"
-                  )
+              date, start, end, summary = match.groups()
+              uid = f"{date}-{start.replace(':','')}-{end.replace(':','')}@jesse232010.github.io"
 
-          calendar = """BEGIN:VCALENDAR
-          VERSION:2.0
-          PRODID:-//Jesse232010//Work Roster//EN
-          CALSCALE:GREGORIAN
-          X-WR-CALNAME:Work Roster
-          """ + "\n".join(events) + """
-          END:VCALENDAR
-          """
+              new_events[uid] = (
+                  "BEGIN:VEVENT\n"
+                  f"UID:{uid}\n"
+                  f"DTSTAMP:{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}\n"
+                  f"DTSTART;TZID=Pacific/Auckland:{date.replace('-','')}T{start.replace(':','')}00\n"
+                  f"DTEND;TZID=Pacific/Auckland:{date.replace('-','')}T{end.replace(':','')}00\n"
+                  f"SUMMARY:{summary}\n"
+                  "END:VEVENT"
+              )
 
-          Path("roster.ics").write_text(calendar.strip() + "\n")
+          existing = path.read_text() if path.exists() else ""
+          existing_events = {}
+
+          for match in re.finditer(r'BEGIN:VEVENT\n(.*?)\nEND:VEVENT', existing, re.S):
+              event = match.group(1)
+              uid_match = re.search(r'^UID:(.+)$', event, re.M)
+
+              if uid_match:
+                  uid = uid_match.group(1).strip()
+                  existing_events[uid] = "BEGIN:VEVENT\n" + event + "\nEND:VEVENT"
+
+          existing_events.update(new_events)
+
+          calendar = (
+              "BEGIN:VCALENDAR\n"
+              "VERSION:2.0\n"
+              "PRODID:-//Jesse232010//Work Roster//EN\n"
+              "CALSCALE:GREGORIAN\n"
+              "X-WR-CALNAME:Work Roster\n"
+              + "\n".join(existing_events.values())
+              + "\nEND:VCALENDAR\n"
+          )
+
+          path.write_text(calendar)
           PY
 
       - name: Commit calendar
