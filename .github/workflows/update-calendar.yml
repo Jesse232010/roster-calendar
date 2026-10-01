@@ -1,0 +1,75 @@
+name: Update roster calendar
+
+on:
+  issues:
+    types: [opened]
+
+permissions:
+  contents: write
+  issues: write
+
+jobs:
+  update-calendar:
+    if: startsWith(github.event.issue.title, 'Roster:')
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Update calendar
+        env:
+          ISSUE_BODY: ${{ github.event.issue.body }}
+        run: |
+          python3 <<'PY'
+          import os
+          import re
+          from pathlib import Path
+
+          body = os.environ.get("ISSUE_BODY", "")
+
+          events = []
+          pattern = re.compile(
+              r'(\d{4}-\d{2}-\d{2})\s*\|\s*(\d{2}:\d{2})\s*\|\s*(\d{2}:\d{2})\s*\|\s*(.+)'
+          )
+
+          for line in body.splitlines():
+              match = pattern.fullmatch(line.strip())
+              if match:
+                  date, start, end, summary = match.groups()
+                  uid = f"{date}-{start.replace(':','')}-{end.replace(':','')}@jesse232010.github.io"
+
+                  events.append(
+                      "BEGIN:VEVENT\n"
+                      f"UID:{uid}\n"
+                      "DTSTAMP:20261001T000000Z\n"
+                      f"DTSTART;TZID=Pacific/Auckland:{date.replace('-','')}T{start.replace(':','')}00\n"
+                      f"DTEND;TZID=Pacific/Auckland:{date.replace('-','')}T{end.replace(':','')}00\n"
+                      f"SUMMARY:{summary}\n"
+                      "END:VEVENT"
+                  )
+
+          calendar = """BEGIN:VCALENDAR
+          VERSION:2.0
+          PRODID:-//Jesse232010//Work Roster//EN
+          CALSCALE:GREGORIAN
+          X-WR-CALNAME:Work Roster
+          """ + "\n".join(events) + """
+          END:VCALENDAR
+          """
+
+          Path("roster.ics").write_text(calendar.strip() + "\n")
+          PY
+
+      - name: Commit calendar
+        run: |
+          git config user.name "roster-calendar"
+          git config user.email "roster-calendar@users.noreply.github.com"
+          git add roster.ics
+          git diff --cached --quiet || git commit -m "Update roster calendar"
+          git push
+
+      - name: Close issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh issue close "${{ github.event.issue.number }}"
